@@ -42,10 +42,10 @@ export default function Layout() {
             </div>
             <div>
               <div className="font-display text-sm font-semibold tracking-wide text-white">
-                APEX ENGINE
+                ANALYSIS MACHINE
               </div>
               <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                Algo Platform
+                Market Intelligence
               </div>
             </div>
           </div>

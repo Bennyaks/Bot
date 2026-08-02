@@ -17,7 +17,7 @@ import { formatDateTime, money } from '../lib/engine';
 import { Link } from 'react-router-dom';
 
 export default function CommandCenter() {
-  const { mode, modeReason, signals, executed, rejected, health, emitDemoSignal, runMarketScan, logs } =
+  const { mode, modeReason, signals, executed, rejected, health, emitDemoSignal, runMarketScan, marketScanStatus, logs } =
     useTradingStore();
   const candles = useMemo(() => generateCandles(72, 1.0838), []);
 
@@ -48,6 +48,7 @@ export default function CommandCenter() {
           </>
         }
       />
+      <p className="-mt-4 mb-5 text-xs text-slate-500" role="status">{marketScanStatus}</p>
 
       {mode === 'SAFE_MODE' && (
         <motion.div

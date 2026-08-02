@@ -77,7 +77,9 @@ interface Store {
   brokerId: string;
   lastBacktest: BacktestSummary | null;
   desktopAlertsEnabled: boolean;
+  desktopAlertStatus: string;
   webhookUrl: string | null;
+  marketScanStatus: string;
   /** Instruments with a real historical CSV series loaded — runBacktest uses one of these automatically instead of synthetic candles when available. */
   csvInstruments: string[];
   replay: ReplayLabState;
@@ -97,6 +99,8 @@ export interface ReplayLabState {
   openTrade: ExecutedTrade | null;
   /** The open trade's current lifecycle state (see core/lifecycle/TradeLifecycle) — CANDIDATE through ARCHIVED, kept in sync as manageOpenPosition runs. */
   lifecycleState: TradeLifecycleState | null;
+  /** Plain-language feedback shown beside the replay setup control. */
+  setupStatus: string | null;
 }
 
 export interface BacktestSummary {
@@ -202,7 +206,9 @@ let state: Store = {
   brokerId: orchestrator.currentBrokerId(),
   lastBacktest: null,
   desktopAlertsEnabled: readLocalSetting(DESKTOP_ALERTS_KEY) === '1',
+  desktopAlertStatus: 'Desktop notifications are not enabled.',
   webhookUrl: readLocalSetting(WEBHOOK_URL_KEY),
+  marketScanStatus: 'Ready to scan all configured markets.',
   csvInstruments: [],
   replay: {
     instrument: 'EURUSD',
@@ -215,6 +221,7 @@ let state: Store = {
     windowCandles: [],
     openTrade: null,
     lifecycleState: null,
+    setupStatus: null,
   },
 };
 
@@ -615,10 +622,13 @@ export function useTradingStore() {
         message: 'SAFE MODE active — market scan skipped, no new trades',
         reproducible: true,
       });
+      setState({ marketScanStatus: 'Scan skipped: SAFE MODE is active.' });
       return;
     }
 
     let qualifyingSetups = 0;
+    let approvedSetups = 0;
+    let rejectedSetups = 0;
 
     for (const instrument of INSTRUMENTS) {
       const snapshot = marketStructureEngine.scan(instrument, '15m', 150);
@@ -644,6 +654,7 @@ export function useTradingStore() {
       });
 
       if (result.outcome !== 'approved') {
+        rejectedSetups += 1;
         const reasons = result.rejectionReasons ?? ['Unknown'];
         const rejection: RejectedTrade = {
           id: `RJ-${Date.now().toString(36).toUpperCase()}`,
@@ -669,6 +680,7 @@ export function useTradingStore() {
       }
 
       const approved: TradeSignal = { ...candidate, status: 'APPROVED', setupStage: 'RISK_APPROVED' };
+      approvedSetups += 1;
       setState({ signals: [approved, ...state.signals] });
       void fillAndSimulateClose(candidate, `market scan · ${candidate.structure}`);
     }
@@ -679,6 +691,9 @@ export function useTradingStore() {
       module: 'MarketStructureEngine',
       message: `Multi-symbol scan complete · ${INSTRUMENTS.length} instruments · ${qualifyingSetups} qualifying setup(s)`,
       reproducible: true,
+    });
+    setState({
+      marketScanStatus: `Scan complete: ${INSTRUMENTS.length} markets checked · ${qualifyingSetups} setup(s) found · ${approvedSetups} approved · ${rejectedSetups} rejected.`,
     });
   }, []);
 
@@ -815,6 +830,7 @@ export function useTradingStore() {
         windowCandles: [],
         openTrade: null,
         lifecycleState: null,
+        setupStatus: null,
       },
     });
 
@@ -940,6 +956,7 @@ export function useTradingStore() {
         message: 'A trade is already open in the replay — close it or let it finish first.',
         reproducible: true,
       });
+      setState({ replay: { ...state.replay, setupStatus: 'A replay trade is already open. Close it or let it finish first.' } });
       return;
     }
     if (state.replay.windowCandles.length < 10) {
@@ -950,6 +967,7 @@ export function useTradingStore() {
         message: 'Not enough candles played yet to evaluate a setup — step or play forward first.',
         reproducible: true,
       });
+      setState({ replay: { ...state.replay, setupStatus: 'Play or step through at least 10 candles before testing a setup.' } });
       return;
     }
 
@@ -962,6 +980,7 @@ export function useTradingStore() {
         message: `No qualifying setup on ${state.replay.instrument} at this point in the replay.`,
         reproducible: true,
       });
+      setState({ replay: { ...state.replay, setupStatus: 'No confirmed breakout at this bar yet. Continue playing or step forward, then try again.' } });
       return;
     }
 
@@ -979,13 +998,14 @@ export function useTradingStore() {
         message: `Setup found but rejected by ${result.rejectionModule} · ${(result.rejectionReasons ?? []).join(', ')}`,
         reproducible: true,
       });
+      setState({ replay: { ...state.replay, setupStatus: `Setup rejected by ${result.rejectionModule ?? 'the decision engine'}: ${(result.rejectionReasons ?? ['Unknown reason']).join(', ')}.` } });
       return;
     }
 
     try {
       const trade = await orchestrator.fillCandidate(candidate);
       replayOpenTradeContext = { entryIndex: state.replay.index, initialStop: trade.stop };
-      setState({ replay: { ...state.replay, openTrade: trade, lifecycleState: orchestrator.lifecycleStateOf(trade.id) } });
+      setState({ replay: { ...state.replay, openTrade: trade, lifecycleState: orchestrator.lifecycleStateOf(trade.id), setupStatus: `${trade.side} setup opened at ${trade.entry.toFixed(5)}. Play or step forward to manage it.` } });
       pushLog({
         timestamp: new Date().toISOString(),
         level: 'TRADE',
@@ -1002,6 +1022,7 @@ export function useTradingStore() {
         message: `Replay fill rejected · ${message}`,
         reproducible: true,
       });
+      setState({ replay: { ...state.replay, setupStatus: `Replay fill failed: ${message}` } });
     }
   }, []);
 
@@ -1037,12 +1058,21 @@ export function useTradingStore() {
         : `Desktop alert permission ${permission} — alerts stay in-app only`,
       reproducible: true,
     });
-    setState({ desktopAlertsEnabled: granted });
+    const status = granted
+      ? 'Desktop notifications are enabled.'
+      : permission === 'denied'
+        ? 'Notifications are blocked by the browser. Open this site\'s browser permissions and allow notifications, then try again.'
+      : permission === 'unsupported'
+          ? 'This browser or page does not support desktop notifications. Use HTTPS or localhost, then reload.'
+          : permission === 'insecure'
+            ? 'Desktop permission requires HTTPS (or localhost). Open the app through a secure URL, then try again.'
+          : 'Notification permission was not granted.';
+    setState({ desktopAlertsEnabled: granted, desktopAlertStatus: status });
   }, []);
 
   const disableDesktopAlerts = useCallback(() => {
     writeLocalSetting(DESKTOP_ALERTS_KEY, null);
-    setState({ desktopAlertsEnabled: false });
+    setState({ desktopAlertsEnabled: false, desktopAlertStatus: 'Desktop notifications are disabled in the app.' });
   }, []);
 
   const setWebhookUrl = useCallback((url: string) => {

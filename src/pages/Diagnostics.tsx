@@ -36,6 +36,7 @@ export default function Diagnostics() {
     loadCsvHistory,
     clearCsvHistory,
     desktopAlertsEnabled,
+    desktopAlertStatus,
     webhookUrl,
     requestDesktopAlerts,
     disableDesktopAlerts,
@@ -349,6 +350,7 @@ export default function Diagnostics() {
                 </Button>
               )}
             </div>
+            <p className="text-[11px] leading-relaxed text-slate-500" role="status">{desktopAlertStatus}</p>
             <div className="space-y-2">
               <label className="text-[11px] text-slate-500" htmlFor="webhook-url">
                 Webhook URL (e.g. a Slack incoming webhook or ntfy.sh topic)
