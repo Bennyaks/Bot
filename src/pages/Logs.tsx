@@ -37,7 +37,7 @@ export default function Logs() {
     <div>
       <PageHeader
         title="Enhanced Logging System"
-        subtitle="Every decision is reproducible. Market state, strategy state, setup lifecycle, indicators, risk, execution, and exits — reconstruct any trade."
+        subtitle="Simulated dashboard activity (demo data) — for your real MT5 connection's logs, go to Live Trading instead."
       />
 
       <div className="flex flex-wrap gap-2 mb-4">

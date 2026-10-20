@@ -56,11 +56,25 @@ export interface MarketProvider {
   subscribe(instrument: string, onCandle: (candle: Candle) => void): () => void;
 }
 
-/** core/interfaces/strategy.ts — a strategy only ever produces candidates. */
+/** core/interfaces/strategy.ts — a strategy only ever produces candidates.
+ *
+ * Multi-timeframe input: h4 (bias) and h1 (structure) are required; m15
+ * (setup/breakout confirmation) is required; m5 (entry confirmation) is
+ * optional — when omitted (e.g. a backtest with no 5-minute history
+ * pulled), a strategy should fall back to confirming the entry on the m15
+ * series itself rather than refusing to ever produce a candidate.
+ */
+export interface MultiTimeframeCandles {
+  h4: Candle[];
+  h1: Candle[];
+  m15: Candle[];
+  m5?: Candle[];
+}
+
 export interface Strategy {
   id: string;
   version: string;
-  evaluate(instrument: string, candles: Candle[]): TradeCandidate | null;
+  evaluate(instrument: string, candles: MultiTimeframeCandles): TradeCandidate | null;
 }
 
 /** core/interfaces/risk_manager.ts — absolute veto authority over every candidate. */
@@ -71,15 +85,7 @@ export interface RiskManagerContract {
 /** core/interfaces/execution_provider.ts — how an approved candidate becomes a filled order. */
 export interface ExecutionProvider {
   id: string;
-  /**
-   * `lotSize` is mandatory: the caller (SystemOrchestrator/BacktestHarness) is
-   * responsible for computing it via PositionSizer against real account
-   * equity before a candidate is ever filled — no ExecutionProvider is
-   * allowed to invent its own size. `spread` (price units, not pips) is
-   * optional context a provider can use to model a realistic fill price;
-   * omit it and the provider fills at the candidate's raw entry.
-   */
-  submit(candidate: TradeCandidate, lotSize: number, spread?: number): Promise<ExecutedTrade> | ExecutedTrade;
+  submit(candidate: TradeCandidate): Promise<ExecutedTrade> | ExecutedTrade;
   close(trade: ExecutedTrade, exitPrice: number): ExecutedTrade;
 }
 
@@ -105,14 +111,6 @@ export interface Storage {
   saveRejection(rejection: RejectedTrade): void;
   loadTrades(): ExecutedTrade[];
   loadRejections(): RejectedTrade[];
-  /**
-   * Audit trail beyond the in-memory rolling 200-line log buffer. Optional
-   * so existing Storage implementations/tests that predate this keep
-   * compiling — SystemOrchestrator checks for the method before calling it.
-   */
-  saveLog?(entry: LogEntry): void;
-  loadLogs?(): LogEntry[];
-  clear(): void;
 }
 
 /** core/interfaces/notifier.ts — the only thing allowed to reach the UI/log surface. */

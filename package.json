@@ -1,19 +1,31 @@
 {
-  "name": "analysis-machine",
+  "name": "placeholder-model-1",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "live": "tsx src/server/liveRunner.ts",
+    "backtest": "tsx src/server/backtest.ts",
+    "electron:build-main": "esbuild electron/main.ts --bundle --platform=node --target=node18 --external:electron --format=cjs --outfile=dist-electron/main.cjs",
+    "electron:build-preload": "esbuild electron/preload.ts --bundle --platform=node --target=node18 --external:electron --format=cjs --outfile=dist-electron/preload.cjs",
+    "electron:build": "npm run electron:build-main && npm run electron:build-preload",
+    "electron:dev": "concurrently -k -n VITE,ELECTRON -c blue,magenta \"vite\" \"npm run electron:build && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:start": "npm run build && npm run electron:build && electron .",
+    "dist:win": "npm run build && npm run electron:build && electron-builder --win --publish=never",
+    "dist:linux": "npm run build && npm run electron:build && electron-builder --linux --publish=never"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",
+    "metaapi.cloud-sdk": "^29.3.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1",
@@ -25,13 +37,44 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "tsx": "^4.23.12",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.tradingplatform.desktop",
+    "productName": "Trading Platform",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
   }
 }

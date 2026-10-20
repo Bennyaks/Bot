@@ -7,7 +7,6 @@ import {
   ShieldAlert,
   Activity,
   CheckCircle2,
-  Radar,
 } from 'lucide-react';
 import { PageHeader, Card, Stat, Badge, Button } from '../components/ui';
 import CandleChart from '../components/CandleChart';
@@ -17,7 +16,7 @@ import { formatDateTime, money } from '../lib/engine';
 import { Link } from 'react-router-dom';
 
 export default function CommandCenter() {
-  const { mode, modeReason, signals, executed, rejected, health, emitDemoSignal, runMarketScan, marketScanStatus, logs } =
+  const { mode, modeReason, signals, executed, rejected, health, emitDemoSignal, logs } =
     useTradingStore();
   const candles = useMemo(() => generateCandles(72, 1.0838), []);
 
@@ -31,10 +30,6 @@ export default function CommandCenter() {
         subtitle="Event-driven breakout platform — strategy emits signals, risk & execution decide. Capital protection overrides profit."
         actions={
           <>
-            <Button onClick={runMarketScan} variant="ghost">
-              <Radar className="h-3.5 w-3.5" />
-              Scan All Markets
-            </Button>
             <Button onClick={emitDemoSignal} variant="primary">
               <Zap className="h-3.5 w-3.5" />
               Emit Signal
@@ -48,7 +43,6 @@ export default function CommandCenter() {
           </>
         }
       />
-      <p className="-mt-4 mb-5 text-xs text-slate-500" role="status">{marketScanStatus}</p>
 
       {mode === 'SAFE_MODE' && (
         <motion.div

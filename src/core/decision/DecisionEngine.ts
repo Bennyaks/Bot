@@ -1,20 +1,14 @@
 import type { RejectedTrade, SessionMetrics } from '../../lib/types';
 import { explainRejection, sessionScore } from '../../lib/engine';
+import { is24_7Market } from '../../lib/instruments';
 import type { TradeApproval, TradeCandidate } from '../interfaces';
 
 export interface DecisionContext {
   sessionMetrics: SessionMetrics[];
   minConfidence?: number;
   minRiskReward?: number;
-  /**
-   * Spread in price units for the candidate's instrument, if known.
-   * MarketProvider.getSpread() existed but nothing ever called it — this is
-   * the field that makes the spread_cost gate below possible. Left
-   * undefined, the gate can't check anything and passes through, so this is
-   * additive and doesn't change behaviour for callers that don't supply it
-   * (e.g. existing tests/backtest configs written before this).
-   */
-  spread?: number;
+  /** Minimum closed trades in a session before its stats are trusted enough to reject on. Default 10. */
+  minSessionSample?: number;
 }
 
 export type DecisionResult =
@@ -45,8 +39,19 @@ export class DecisionEngine {
       id: 'session_evidence',
       label: 'Session evidence',
       evaluate: (c, ctx) => {
+        // Crypto and other 24/7 markets have no "session" to have evidence
+        // for — the Asian/London/NewYork model this gate checks is an FX
+        // concept. Skip rather than reject: an empty/missing sessionMetrics
+        // entry for a 24/7 instrument isn't evidence of underperformance.
+        if (is24_7Market(c.instrument)) return true;
         const metrics = ctx.sessionMetrics.find((m) => m.session === c.session);
-        if (!metrics) return false;
+        const minSample = ctx.minSessionSample ?? 10;
+        // No matching entry, or too few REAL closed trades in this session
+        // to draw a conclusion from, is an absence of evidence — not
+        // evidence of underperformance. A fresh live account starts with
+        // zero trades in every session; that must not read as "every
+        // session has failed" the way it would if this returned false.
+        if (!metrics || metrics.totalTrades < minSample) return true;
         return sessionScore(c.session, metrics).allow;
       },
     },
@@ -69,25 +74,6 @@ export class DecisionEngine {
       id: 'no_news_event',
       label: 'No active news event',
       evaluate: (c) => c.marketRegime !== 'NEWS_EVENT',
-    },
-    {
-      id: 'spread_cost',
-      label: 'Reward:risk survives spread cost',
-      evaluate: (c, ctx) => {
-        // A spread has to be crossed on entry and would still have to be
-        // crossed on an unfavourable exit, so it widens effective risk and
-        // shrinks effective reward. Without ctx.spread this gate has
-        // nothing to check against and passes — it never blocks a
-        // candidate the caller didn't give spread data for.
-        if (ctx.spread == null || ctx.spread <= 0) return true;
-        const risk = Math.abs(c.entry - c.stop);
-        const reward = Math.abs(c.target - c.entry);
-        if (risk <= 0) return false;
-        const netRisk = risk + ctx.spread;
-        const netReward = Math.max(reward - ctx.spread, 0);
-        const netRiskReward = netReward / netRisk;
-        return netRiskReward >= (ctx.minRiskReward ?? 1.5);
-      },
     },
   ];
 

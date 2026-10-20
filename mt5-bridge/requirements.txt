@@ -1,0 +1,9 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+pydantic>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+
+# Windows-only — this is the actual point of this service. If `pip install`
+# fails on this line, you're not on the Windows machine with the MT5
+# terminal installed, which is the only place this bridge is meant to run.
+MetaTrader5>=5.0.45

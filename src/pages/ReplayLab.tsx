@@ -138,11 +138,6 @@ export default function ReplayLab() {
                 <Target className="h-3.5 w-3.5" />
                 Try Setup Here
               </Button>
-              {replay.setupStatus && (
-                <p className="text-[11px] leading-relaxed text-slate-400" role="status">
-                  {replay.setupStatus}
-                </p>
-              )}
             </div>
           </Card>
 

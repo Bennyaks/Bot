@@ -101,22 +101,6 @@ export interface TradeSignal {
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'EXPIRED';
 }
 
-export interface StrategyVersion {
-  version: string;
-  createdAt: string;
-  changelog: string[];
-  status: 'draft' | 'backtesting' | 'paper' | 'live' | 'retired';
-  metrics: {
-    winRate: number;
-    profitFactor: number;
-    averageR: number;
-    maxDrawdown: number;
-    totalTrades: number;
-    sharpe: number;
-  };
-  parentVersion?: string;
-}
-
 export interface HealthComponent {
   id: string;
   name: string;
@@ -144,11 +128,4 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
-}
-
-export interface PipelineStage {
-  id: string;
-  name: string;
-  description: string;
-  status: 'idle' | 'active' | 'passed' | 'failed' | 'blocked';
 }

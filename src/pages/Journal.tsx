@@ -5,7 +5,7 @@ import { useTradingStore } from '../hooks/useTradingStore';
 import { formatDateTime } from '../lib/engine';
 
 export default function Journal() {
-  const { rejected, selectedRejectId, selectReject, simulateReject, analytics } = useTradingStore();
+  const { rejected, selectedRejectId, selectReject, simulateReject, stats } = useTradingStore();
 
   const selected = useMemo(
     () => rejected.find((r) => r.id === selectedRejectId) ?? rejected[0],
@@ -25,11 +25,21 @@ export default function Journal() {
         }
       />
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <AnalyticsStat label="Win Rate" value={`${analytics.winRate}%`} />
-        <AnalyticsStat label="Profit Factor" value={analytics.profitFactor.toFixed(2)} />
-        <AnalyticsStat label="Expectancy" value={`${analytics.expectancy >= 0 ? '+' : ''}${analytics.expectancy}R`} />
-        <AnalyticsStat label="Closed Trades" value={String(analytics.sampleSize)} />
+      <div className="grid sm:grid-cols-3 gap-4 mb-4">
+        <Card className="px-4 py-3">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Win Rate</div>
+          <div className="text-xl font-mono text-white mt-1">{stats.winRate}%</div>
+        </Card>
+        <Card className="px-4 py-3">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Profit Factor</div>
+          <div className="text-xl font-mono text-white mt-1">
+            {Number.isFinite(stats.profitFactor) ? stats.profitFactor.toFixed(2) : '∞'}
+          </div>
+        </Card>
+        <Card className="px-4 py-3">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Expectancy</div>
+          <div className="text-xl font-mono text-white mt-1">{stats.expectancy}R</div>
+        </Card>
       </div>
 
       <div className="grid lg:grid-cols-5 gap-4">
@@ -169,16 +179,6 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-line bg-surface/40 px-3 py-2">
       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className="font-mono text-sm text-slate-100 mt-0.5 truncate">{value}</div>
-    </div>
-  );
-}
-
-/** Backed by core/analytics/TradeAnalytics via SystemOrchestrator.getAnalyticsSummary() — recomputed live off every TradeArchived event, not static demo numbers. */
-function AnalyticsStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-line bg-surface/40 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="font-display text-lg text-white mt-0.5">{value}</div>
     </div>
   );
 }

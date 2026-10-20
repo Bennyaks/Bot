@@ -8,7 +8,7 @@ export default function CandleChart({
   candles: Candle[];
   height?: number;
 }) {
-  const { path, volMax, min, max, last } = useMemo(() => {
+  const { path, volMax, min, max, last, entryY, stopY, targetY } = useMemo(() => {
     const highs = candles.map((c) => c.high);
     const lows = candles.map((c) => c.low);
     const minP = Math.min(...lows);

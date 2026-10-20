@@ -1,103 +1,80 @@
-import { getInstrumentSpec, type InstrumentSpec } from '../../lib/instruments';
-
-export interface PositionSizingRules {
-  /** % of account equity risked per trade, e.g. 1 = risk 1% of equity. */
-  riskPercentPerTrade: number;
-  /** Hard ceiling on lot size regardless of what the risk math produces. */
-  maxLotSize: number;
-}
-
-export const DEFAULT_POSITION_SIZING_RULES: PositionSizingRules = {
-  riskPercentPerTrade: 1,
-  maxLotSize: 5,
-};
-
-export interface PositionSizeInput {
-  equity: number;
-  entry: number;
-  stop: number;
-  instrument: string;
-  /** Spread in price units, if known — widens effective stop distance since a spread must be crossed to exit at a loss too. */
-  spread?: number;
-}
-
-export interface PositionSizeResult {
-  lotSize: number;
-  /** Dollar amount actually at risk once the sizing is rounded/clamped to a tradable lot. */
-  riskAmountUsd: number;
-  /** riskAmountUsd expressed as a % of the input equity, for comparison against the target. */
-  effectiveRiskPercent: number;
-  stopDistance: number;
-  clamped: boolean;
-  warnings: string[];
-}
-
 /**
  * core/risk/PositionSizer
  * --------------------------
- * Previously `lotSize` was hardcoded to 0.1 in PaperBroker, MT5Broker, the
- * backtest harness, and the demo data — every trade risked the same amount
- * regardless of account size or stop width, which is the opposite of
- * "capital protection overrides profit". This computes lots from
- * (equity * risk%) / (stop distance in $ per lot), so a wide stop
- * automatically produces a smaller position and a tight stop a larger one,
- * always targeting the same dollar risk.
+ * A flat lot size risks a wildly different dollar amount depending on how
+ * wide a given trade's stop is — a 10-pip stop and a 40-pip stop at the
+ * same 0.01 lots are not "the same risk," which quietly breaks the
+ * R-multiple math the rest of the platform (RiskManager's maxDailyLossR,
+ * expectancy, win-rate) is built on. This computes the lot size that risks
+ * a fixed PERCENTAGE of account equity on every trade instead, so 1R
+ * always means the same thing regardless of that trade's stop distance.
+ *
+ * Pure function, no broker/network dependency — both MT5Broker and
+ * MetaApiBroker call this with whatever symbol specification their own API
+ * gives them.
  */
-export class PositionSizer {
-  constructor(private rules: PositionSizingRules = DEFAULT_POSITION_SIZING_RULES) {}
 
-  calculate(input: PositionSizeInput): PositionSizeResult {
-    const spec: InstrumentSpec = getInstrumentSpec(input.instrument);
-    const warnings: string[] = [];
+export interface SymbolRiskInfo {
+  /** Smallest price increment the broker quotes, e.g. 0.00001 for a 5-digit EURUSD. */
+  tickSize: number;
+  /** Account-currency value of one tick move, for 1.00 lot. */
+  tickValue: number;
+  volumeMin: number;
+  volumeMax: number;
+  volumeStep: number;
+}
 
-    const rawStopDistance = Math.abs(input.entry - input.stop);
-    // A spread has to be crossed on both entry and exit, so it effectively
-    // widens the distance between where you get filled and where a loss is
-    // realized — price it into the sizing, not just the decision gate.
-    const stopDistance = rawStopDistance + (input.spread ?? 0);
+export interface RiskSizingParams {
+  equity: number;
+  /** Fraction of equity to risk on this trade, e.g. 0.01 for 1%. */
+  riskPercent: number;
+  entry: number;
+  stop: number;
+  symbolInfo: SymbolRiskInfo;
+}
 
-    if (stopDistance <= 0 || input.equity <= 0) {
-      warnings.push('Invalid stop distance or equity — sized to minimum lot as a fail-safe.');
-      return {
-        lotSize: spec.minLot,
-        riskAmountUsd: 0,
-        effectiveRiskPercent: 0,
-        stopDistance,
-        clamped: true,
-        warnings,
-      };
-    }
+export interface RiskSizingResult {
+  lots: number;
+  /** Account-currency amount this position actually risks at the computed, broker-step-snapped lot size (not the requested riskPercent exactly — rounding to the broker's volume step moves it slightly). */
+  riskAmount: number;
+  warning?: string;
+}
 
-    const riskAmountTarget = input.equity * (this.rules.riskPercentPerTrade / 100);
-    const pipsAtRisk = stopDistance / spec.pipSize;
-    const dollarRiskPerLot = pipsAtRisk * spec.pipValuePerStandardLot;
+export function computeRiskBasedLotSize(params: RiskSizingParams): RiskSizingResult {
+  const { equity, riskPercent, entry, stop, symbolInfo } = params;
+  const { tickSize, tickValue, volumeMin, volumeMax, volumeStep } = symbolInfo;
 
-    let lots = dollarRiskPerLot > 0 ? riskAmountTarget / dollarRiskPerLot : spec.minLot;
-
-    // Round to the instrument's lot step.
-    lots = Math.round(lots / spec.lotStep) * spec.lotStep;
-
-    let clamped = false;
-    const rulesMax = Math.min(this.rules.maxLotSize, spec.maxLot);
-    if (lots > rulesMax) {
-      warnings.push(
-        `Sizing capped at max lot ${rulesMax} (risk math wanted ${lots.toFixed(2)} — stop is unusually tight for this equity).`
-      );
-      lots = rulesMax;
-      clamped = true;
-    }
-    if (lots < spec.minLot) {
-      warnings.push(
-        `Sizing floored at min lot ${spec.minLot} (risk math wanted ${lots.toFixed(4)} — actual risk will exceed the ${this.rules.riskPercentPerTrade}% target because the stop is wide relative to equity).`
-      );
-      lots = spec.minLot;
-      clamped = true;
-    }
-
-    lots = Number(lots.toFixed(2));
-    const riskAmountUsd = Number((lots * dollarRiskPerLot).toFixed(2));
-    const effectiveRiskPercent = Number(((riskAmountUsd / input.equity) * 100).toFixed(3));
-
-    return { lotSize: lots, riskAmountUsd, effectiveRiskPercent, stopDistance, clamped, warnings };
+  const stopDistance = Math.abs(entry - stop);
+  if (stopDistance <= 0 || tickSize <= 0 || tickValue <= 0 || equity <= 0 || riskPercent <= 0) {
+    return {
+      lots: volumeMin,
+      riskAmount: 0,
+      warning: 'Could not compute risk-based lot size (missing price/symbol data) — using the symbol minimum lot instead.',
+    };
   }
+
+  const riskAmountTarget = equity * riskPercent;
+  const ticksAtRisk = stopDistance / tickSize;
+  const valuePerLotAtRisk = ticksAtRisk * tickValue;
+  let lots = valuePerLotAtRisk > 0 ? riskAmountTarget / valuePerLotAtRisk : volumeMin;
+
+  // Snap to what the broker will actually accept — same rule submit_order's
+  // resolve_volume() applies server-side, done here too so the UI/log can
+  // show the real size before the order is even sent.
+  lots = Math.max(volumeMin, Math.min(volumeMax, lots));
+  if (volumeStep > 0) {
+    const steps = Math.round((lots - volumeMin) / volumeStep);
+    lots = Number((volumeMin + steps * volumeStep).toFixed(8));
+  }
+
+  const actualRiskAmount = Number((valuePerLotAtRisk * lots).toFixed(2));
+  const requestedLotsBeforeSnap = riskAmountTarget / valuePerLotAtRisk;
+  const warning =
+    requestedLotsBeforeSnap < volumeMin
+      ? `Requested risk (${(riskPercent * 100).toFixed(2)}% = ${riskAmountTarget.toFixed(2)}) would need less than the symbol's minimum lot (${volumeMin}) — using the minimum instead, which risks more than requested (${actualRiskAmount.toFixed(2)}).`
+      : requestedLotsBeforeSnap > volumeMax
+        ? `Requested risk would need more than the symbol's maximum lot (${volumeMax}) — capping there, which risks less than requested.`
+        : undefined;
+
+  return { lots, riskAmount: actualRiskAmount, warning };
 }

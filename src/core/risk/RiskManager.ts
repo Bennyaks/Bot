@@ -1,5 +1,4 @@
 import { explainRejection } from '../../lib/engine';
-import { currencyExposureLegs } from '../../lib/instruments';
 import type { RejectedTrade } from '../../lib/types';
 import type {
   PortfolioState,
@@ -15,13 +14,13 @@ export interface RiskRules {
   maxExposurePerSymbol: number;
   minRiskReward: number;
   /**
-   * Max net directional exposure to a single underlying currency, in "R
-   * units" (one open position each on the base or quote side = 1 unit).
-   * Long EURUSD + Long GBPUSD + Short USDJPY is -3 net USD exposure even
-   * though each looks like an independent 1R risk on its own symbol — this
-   * is the check that catches that.
+   * Two different instruments sharing a currency (EURUSD + GBPUSD both
+   * touch USD; EURUSD + EURGBP both touch EUR) are correlated bets, not
+   * independent ones — a single currency move can hit both at once. This
+   * caps how many open positions may touch any one currency, including
+   * the candidate about to open.
    */
-  maxCurrencyExposure: number;
+  maxPositionsPerCurrency: number;
 }
 
 export const DEFAULT_RISK_RULES: RiskRules = {
@@ -30,7 +29,7 @@ export const DEFAULT_RISK_RULES: RiskRules = {
   maxConsecutiveLosses: 3,
   maxExposurePerSymbol: 1,
   minRiskReward: 1.5,
-  maxCurrencyExposure: 2,
+  maxPositionsPerCurrency: 2,
 };
 
 /**
@@ -58,27 +57,19 @@ export class RiskManager implements RiskManagerContract {
     return portfolio.openPositions.filter((p) => p.instrument === instrument).length;
   }
 
-  /**
-   * Net signed exposure per currency across every open position plus the
-   * candidate itself. A currency that only the candidate touches but no
-   * open position does still returns a defined (non-zero) entry so the
-   * caller doesn't need a separate existence check.
-   */
-  private currencyExposure(
-    portfolio: PortfolioState,
-    candidate: TradeCandidate
-  ): Map<string, number> {
-    const totals = new Map<string, number>();
-    const add = (instrument: string, side: TradeCandidate['side']) => {
-      for (const leg of currencyExposureLegs(instrument, side)) {
-        totals.set(leg.currency, (totals.get(leg.currency) ?? 0) + leg.sign);
-      }
-    };
-    for (const position of portfolio.openPositions) {
-      add(position.instrument, position.side);
+  /** e.g. 'EURUSD' -> ['EUR', 'USD']. Falls back to the whole symbol for anything non-standard (crypto/CFD tickers etc.) rather than throwing. */
+  private currenciesOf(instrument: string): string[] {
+    const symbol = instrument.toUpperCase();
+    return symbol.length >= 6 ? [symbol.slice(0, 3), symbol.slice(3, 6)] : [symbol];
+  }
+
+  /** The first currency already at or over the limit once this candidate is included, or null if none. */
+  private correlatedCurrencyLimit(portfolio: PortfolioState, instrument: string): { currency: string; count: number } | null {
+    for (const currency of this.currenciesOf(instrument)) {
+      const count = portfolio.openPositions.filter((p) => this.currenciesOf(p.instrument).includes(currency)).length;
+      if (count + 1 > this.rules.maxPositionsPerCurrency) return { currency, count };
     }
-    add(candidate.instrument, candidate.side);
-    return totals;
+    return null;
   }
 
   evaluate(candidate: TradeCandidate, portfolio: PortfolioState): RiskVerdict {
@@ -116,22 +107,13 @@ export class RiskManager implements RiskManagerContract {
       };
     }
 
-    const exposureAfterCandidate = this.currencyExposure(portfolio, candidate);
-    const candidateCurrencies = currencyExposureLegs(candidate.instrument, candidate.side).map(
-      (leg) => leg.currency
-    );
-    for (const currency of candidateCurrencies) {
-      const net = exposureAfterCandidate.get(currency) ?? 0;
-      if (Math.abs(net) > this.rules.maxCurrencyExposure) {
-        const contributors = portfolio.openPositions
-          .filter((p) => currencyExposureLegs(p.instrument, p.side).some((leg) => leg.currency === currency))
-          .map((p) => `${p.side} ${p.instrument}`);
-        return {
-          approved: false,
-          ruleId: 'correlation_exposure',
-          reason: `Adding ${candidate.side} ${candidate.instrument} would push net ${currency} exposure to ${net} (limit ${this.rules.maxCurrencyExposure}) — correlated with ${contributors.join(', ') || 'no other open positions'}`,
-        };
-      }
+    const correlated = this.correlatedCurrencyLimit(portfolio, candidate.instrument);
+    if (correlated) {
+      return {
+        approved: false,
+        ruleId: 'max_currency_correlation',
+        reason: `${correlated.count} open position(s) already exposed to ${correlated.currency} — opening ${candidate.instrument} would be a correlated bet, not an independent one`,
+      };
     }
 
     if (candidate.riskReward < this.rules.minRiskReward) {

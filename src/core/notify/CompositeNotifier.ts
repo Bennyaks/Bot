@@ -85,13 +85,8 @@ export class CompositeNotifier implements Notifier {
   }
 
   /** Ask the browser for desktop notification permission. Call from a user gesture (button click). */
-  static async requestPermission(): Promise<NotificationPermission | 'unsupported' | 'insecure'> {
+  static async requestPermission(): Promise<NotificationPermission | 'unsupported'> {
     if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'unsupported';
-    // Browsers only permit notification prompts from secure contexts (HTTPS,
-    // with localhost treated as secure). Without this check Chromium often
-    // simply returns "denied" without showing a prompt, which looks like a
-    // broken button to the user.
-    if (!window.isSecureContext) return 'insecure';
     if (Notification.permission === 'granted' || Notification.permission === 'denied') {
       return Notification.permission;
     }
